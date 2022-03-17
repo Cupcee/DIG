@@ -1,0 +1,12 @@
+NOTES
+mask_ent = - edge_mask * torch.log(edge_mask) - (1 - edge_mask) * torch.log(1 - edge_mask)
+Why is this cross-entropy between itself?
+
+CF learning:
+* we want to maximize the number of mismatches between original predictions and predictions with flipped labels
+==> finds nodes which are sensitive for predictions
+
+Needed for PGExplainer
+* Subgraph l-hop neighbourhood A_v
+* Perturbation function for A_v => \hat{A_v}
+* Modify loss function
