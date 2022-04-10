@@ -608,24 +608,57 @@ class PGExplainer(nn.Module):
                 return module.flow
         return "source_to_target"
 
-    def __loss__(self, prob: Tensor, ori_pred: int):
-        logit = prob[ori_pred]
-        logit = logit + EPS
-        pred_loss = -torch.log(logit)
+    # probs (:obj:`torch.Tensor`): The classification probability for graph with edge mask
+    def __loss__(self, probs, y_pred_orig, y_pred_new_actual, adj, P, beta=0.5):
+        pred_same = (y_pred_new_actual == y_pred_orig).float()
 
-        # size
-        edge_mask = self.sparse_mask_values
-        size_loss = self.coff_size * torch.sum(edge_mask)
+        # output uses differentiable P_hat ==> adjacency matrix not binary, but needed for training
+        # output_actual uses thresholded P ==> binary adjacency matrix ==> gives actual prediction
+        # output = self.cf_model.forward(self.x, self.A_x) # log_softmax(probs)
+        # output_actual, self.P = self.cf_model.forward_prediction(self.x)
 
-        # entropy
-        edge_mask = edge_mask * 0.99 + 0.005
-        mask_ent = -edge_mask * torch.log(edge_mask) - (1 - edge_mask) * torch.log(
-            1 - edge_mask
+        # Need to use new_idx from now on since sub_adj is reindexed
+        # y_pred_new = torch.argmax(output[self.new_idx])
+        # y_pred_new_actual = torch.argmax(output_actual[self.new_idx])
+
+        # Need dim >=2 for F.nll_loss to work
+        output = probs.unsqueeze(0)
+        y_pred_orig = y_pred_orig.unsqueeze(0)
+
+        # if self.edge_additions:
+        #    cf_adj = self.P
+        # else:
+        cf_adj = P * adj
+        cf_adj.requires_grad = (
+            True  # Need to change this otherwise loss_graph_dist has no gradient
         )
-        mask_ent_loss = self.coff_ent * torch.mean(mask_ent)
 
-        loss = pred_loss + size_loss + mask_ent_loss
-        return loss
+        # Want negative in front to maximize loss instead of minimizing it to find CFs
+        loss_pred = -F.nll_loss(output, y_pred_orig)
+        loss_graph_dist = (
+            sum(sum(abs(cf_adj - adj))) / 2
+        )  # Number of edges changed (symmetrical)
+
+        # Zero-out loss_pred with pred_same if prediction flips
+        loss_total = pred_same * loss_pred + beta * loss_graph_dist
+        return loss_total, loss_pred, loss_graph_dist, cf_adj
+
+    # def __loss__(self, prob: Tensor, ori_pred: int, adj):
+    #    logit = prob[ori_pred]
+    #    logit = logit + EPS
+    #    pred_loss = - torch.log(logit)
+
+    #    # size
+    #    edge_mask = self.sparse_mask_values
+    #    size_loss = self.coff_size * torch.sum(edge_mask)
+
+    #    # entropy
+    #    edge_mask = edge_mask * 0.99 + 0.005
+    #    mask_ent = - edge_mask * torch.log(edge_mask) - (1 - edge_mask) * torch.log(1 - edge_mask)
+    #    mask_ent_loss = self.coff_ent * torch.mean(mask_ent)
+
+    #    loss = pred_loss + size_loss + mask_ent_loss
+    #    return loss
 
     def get_subgraph(
         self,
