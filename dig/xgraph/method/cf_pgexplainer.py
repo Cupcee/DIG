@@ -613,7 +613,7 @@ class PGExplainer(nn.Module):
     # y_pred_new_actual: Perturbed predictions by the GNN
     # edge_index (2, num_edges): Node adjacency matrix
     # P: Perturbation matrix
-    def __loss__(self, probs, y_pred_orig, y_pred_new_actual, adj, P, beta=0.5):
+    def __loss__(self, probs, y_pred_orig, y_pred_new_actual, adj, edge_mask, beta=0.5):
         pred_same = (y_pred_new_actual == y_pred_orig).float()
 
         # Need dim >=2 for F.nll_loss to work
@@ -623,7 +623,7 @@ class PGExplainer(nn.Module):
         # if self.edge_additions:
         #    cf_adj = self.P
         # else:
-        cf_adj = P * adj
+        cf_adj = edge_mask * adj
         cf_adj.requires_grad = (
             True  # Need to change this otherwise loss_graph_dist has no gradient
         )
@@ -893,6 +893,7 @@ class PGExplainer(nn.Module):
                         data.edge_index,
                         edge_mask,
                     )
+
                     # loss_tmp = self.__loss__(pred[new_node_index], pred_dict[node_idx])
                     loss_tmp.backward()
                     loss += loss_tmp.item()
