@@ -20,4 +20,4 @@ class GLNN(nn.Module):
         x = self.node_emb(x)
         for i in range(self.num_hidden_layers):
             x = self.hidden_layers[i](x)
-        return self.out(x)
+        return None, self.out(x)
