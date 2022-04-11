@@ -609,17 +609,12 @@ class PGExplainer(nn.Module):
         return "source_to_target"
 
     # probs (:obj:`torch.Tensor`): The classification probability for graph with edge mask
+    # y_pred_orig: Original predictions by the GNN (see ori_pred_dict...)
+    # y_pred_new_actual: Perturbed predictions by the GNN
+    # edge_index (2, num_edges): Node adjacency matrix
+    # P: Perturbation matrix
     def __loss__(self, probs, y_pred_orig, y_pred_new_actual, adj, P, beta=0.5):
         pred_same = (y_pred_new_actual == y_pred_orig).float()
-
-        # output uses differentiable P_hat ==> adjacency matrix not binary, but needed for training
-        # output_actual uses thresholded P ==> binary adjacency matrix ==> gives actual prediction
-        # output = self.cf_model.forward(self.x, self.A_x) # log_softmax(probs)
-        # output_actual, self.P = self.cf_model.forward_prediction(self.x)
-
-        # Need to use new_idx from now on since sub_adj is reindexed
-        # y_pred_new = torch.argmax(output[self.new_idx])
-        # y_pred_new_actual = torch.argmax(output_actual[self.new_idx])
 
         # Need dim >=2 for F.nll_loss to work
         output = probs.unsqueeze(0)
@@ -641,7 +636,7 @@ class PGExplainer(nn.Module):
 
         # Zero-out loss_pred with pred_same if prediction flips
         loss_total = pred_same * loss_pred + beta * loss_graph_dist
-        return loss_total, loss_pred, loss_graph_dist, cf_adj
+        return loss_total  # , loss_pred, loss_graph_dist, cf_adj
 
     # def __loss__(self, prob: Tensor, ori_pred: int, adj):
     #    logit = prob[ori_pred]
@@ -712,11 +707,19 @@ class PGExplainer(nn.Module):
         return x, edge_index, y, subset, kwargs
 
     def concrete_sample(
-        self, log_alpha: Tensor, beta: float = 1.0, training: bool = True
+        self,
+        log_alpha: Tensor,
+        r1: float,
+        r2: float,
+        beta: float = 1.0,
+        training: bool = True,
     ):
         r"""Sample from the instantiation of concrete distribution when training"""
         if training:
-            random_noise = torch.rand(log_alpha.shape)
+            random_noise = (r1 - r2) * torch.rand(log_alpha.shape) + r2
+            # random_noise = nn.init.trunc_normal_(
+            #    torch.empty(log_alpha.shape), mean=0.9, std=1.0, a=0.0, b=1.0
+            # )
             random_noise = torch.log(random_noise) - torch.log(1.0 - random_noise)
             gate_inputs = (random_noise.to(log_alpha.device) + log_alpha) / beta
             gate_inputs = gate_inputs.sigmoid()
@@ -733,7 +736,7 @@ class PGExplainer(nn.Module):
         tmp: float = 1.0,
         training: bool = False,
         **kwargs,
-    ) -> Tuple[float, Tensor]:
+    ) -> Tuple[Tensor, Tensor]:
         r"""explain the GNN behavior for graph with explanation network
 
         Args:
@@ -769,7 +772,9 @@ class PGExplainer(nn.Module):
         for elayer in self.elayers:
             h = elayer(h)
         values = h.reshape(-1)
-        values = self.concrete_sample(values, beta=tmp, training=training)
+        values = self.concrete_sample(
+            values, r1=0.4, r2=1.0, beta=tmp, training=training
+        )
         self.sparse_mask_values = values
         mask_sparse = torch.sparse_coo_tensor(edge_index, values, (nodesize, nodesize))
         mask_sigmoid = mask_sparse.to_dense()
@@ -861,10 +866,34 @@ class PGExplainer(nn.Module):
                         )
                         emb = self.model.get_emb(data.x, data.edge_index)
                         new_node_index = int(torch.where(subset == node_idx)[0])
+
+                    # output uses differentiable P_hat ==> adjacency matrix not binary, but needed for training
+                    # output_actual uses thresholded P ==> binary adjacency matrix ==> gives actual prediction
+                    # output = self.cf_model.forward(self.x, self.A_x) # log_softmax(probs)
+                    # output_actual, self.P = self.cf_model.forward_prediction(self.x)
+
+                    # Need to use new_idx from now on since sub_adj is reindexed
+                    # y_pred_new = torch.argmax(output[self.new_idx])
+                    # y_pred_new_actual = torch.argmax(output_actual[self.new_idx])
+
+                    # probs (:obj:`torch.Tensor`): The classification probability for graph with edge mask
+                    # y_pred_orig: Original predictions by the GNN (see ori_pred_dict...)
+                    # y_pred_new_actual: Perturbed predictions by the GNN
+                    # edge_index (2, num_edges): Node adjacency matrix
+                    # P: Perturbation matrix
+                    # def __loss__(self, probs, y_pred_orig, y_pred_new_actual, adj, P, beta=0.5):
                     pred, edge_mask = self.explain(
                         x, edge_index, emb, tmp, training=True, node_idx=new_node_index
                     )
-                    loss_tmp = self.__loss__(pred[new_node_index], pred_dict[node_idx])
+
+                    loss_tmp = self.__loss__(
+                        pred[new_node_index],
+                        pred_dict[node_idx],
+                        pred.argmax(-1),
+                        data.edge_index,
+                        edge_mask,
+                    )
+                    # loss_tmp = self.__loss__(pred[new_node_index], pred_dict[node_idx])
                     loss_tmp.backward()
                     loss += loss_tmp.item()
 
