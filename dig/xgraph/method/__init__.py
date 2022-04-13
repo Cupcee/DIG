@@ -4,6 +4,7 @@ from .gnn_lrp import GNN_LRP
 from .gnnexplainer import GNNExplainer
 from .gradcam import GradCAM
 from .pgexplainer import PGExplainer
+from .cf_pgexplainer import CFPGExplainer
 from .subgraphx import SubgraphX, MCTS
 
 __all__ = [
@@ -13,6 +14,7 @@ __all__ = [
     'GNN_GI',
     'GradCAM',
     'PGExplainer',
+    'CFPGExplainer',
     'MCTS',
     'SubgraphX',
 ]

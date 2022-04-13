@@ -487,7 +487,7 @@ class PlotUtils(object):
             raise NotImplementedError
 
 
-class PGExplainer(nn.Module):
+class CFPGExplainer(nn.Module):
     r"""
     An implementation of PGExplainer in
     `Parameterized Explainer for Graph Neural Network <https://arxiv.org/abs/2011.04573>`_.
